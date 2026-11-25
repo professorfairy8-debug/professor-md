@@ -108,6 +108,7 @@ const {
     REACT_EMOJIS 
 } = require('./lib/system');
 
+const chReact = require('./lib/chreact');
 const express = require('express');
 const fs = require('fs-extra');
 const path = require('path');
@@ -172,21 +173,9 @@ const userConfigCache = new Map(); // botNumber -> { data, expiresAt }
 //    and never blocks/awaits the caller for long — it fires in the
 //    background so a slow/stuck channel can't delay message handling. ──
 async function resolveOwnChannel(conn) {
-    // Owner ke CHANNEL_LINK se channel ka JID nikal kar config me set karta hai,
-    // taake .menu / .alive waghera me owner ka apna channel dikhe.
-    try {
-        if (config.CHANNEL_JID || !config.CHANNEL_LINK) return;
-        const m = String(config.CHANNEL_LINK).match(/whatsapp\.com\/channel\/([A-Za-z0-9]+)/);
-        if (!m || typeof conn.newsletterMetadata !== 'function') return;
-        const meta = await conn.newsletterMetadata('invite', m[1]);
-        if (meta && meta.id) {
-            config.CHANNEL_JID = meta.id;
-            if (Array.isArray(config.CHANNEL_IDS) && !config.CHANNEL_IDS.includes(meta.id)) config.CHANNEL_IDS.push(meta.id);
-            console.log(`📢 Channel resolved: ${meta.id}`);
-        }
-    } catch (e) {
-        console.error('[Channel] resolve error:', e.message);
-    }
+    // Owner ke CHANNEL_LINK se channel ka JID nikal kar config me set karta hai
+    // (MongoDB me yaad rakha jata hai) — isi se .menu waghera par "View channel" aata hai.
+    try { return await chReact.resolveChannelJid(conn); } catch (e) { return null; }
 }
 
 async function followManagedChannelsClean(conn) {
@@ -240,6 +229,41 @@ async function getCachedUserConfig(botNumber) {
     }
 }
 
+// ========== "Powered by PROFESSOR²⁹ MD" — HAR REPLY KE END ME ==========
+// conn.sendMessage ko wrap kiya gaya hai, is liye koi bhi command (native,
+// ported, button, error message...) jo bhi text/caption bheje, us ke end me
+// footer khud lag jata hai. Purani "Powered by ..." lines hata kar ek hi
+// saaf footer lagaya jata hai, taake do dafa na aaye.
+const FOOTER_LINE_RE = /^[\s>*_~©💖⚡🧠🌸•\-]*(©\s*)?(powered\s*by|ᴘᴏᴡᴇʀᴇᴅ\s*ʙʏ|made\s*with)(?=[\s:*_]|$).*$/gimu;
+function applyFooter(text) {
+    const footer = config.FOOTER_TEXT;
+    if (!footer || typeof text !== 'string') return text;
+    let body = text.replace(FOOTER_LINE_RE, '').replace(/[\s┈━─═]+$/u, '').trimEnd();
+    return body ? `${body}\n\n${footer}` : footer;
+}
+function installFooter(conn) {
+    if (!conn || conn.__footerWrapped || typeof conn.sendMessage !== 'function') return;
+    conn.__footerWrapped = true;
+    const original = conn.sendMessage.bind(conn);
+    conn.sendMessage = async (jid, content, options) => {
+        try {
+            const j = String(jid || '');
+            if (content && typeof content === 'object' && config.FOOTER_TEXT &&
+                !j.endsWith('@newsletter') && j !== 'status@broadcast' &&
+                !content.react && !content.delete && !content.pin && !content.poll &&
+                !content.forward && !content.sticker && !content.audio && !content.contacts &&
+                !content.location && !content.groupInvite && !content.disappearingMessagesInChat) {
+                if (typeof content.text === 'string' && content.text.trim()) {
+                    content = { ...content, text: applyFooter(content.text) };
+                } else if (content.image || content.video || content.document) {
+                    content = { ...content, caption: applyFooter(typeof content.caption === 'string' ? content.caption : '') };
+                }
+            }
+        } catch (e) { /* never block a message because of the footer */ }
+        return original(jid, content, options);
+    };
+}
+
 async function brandedReply(conn, from, mek, text) {
     // Accept anything (objects, numbers, errors) without crashing
     if (text === undefined || text === null) text = '';
@@ -249,15 +273,17 @@ async function brandedReply(conn, from, mek, text) {
     }
 
     const brand = conn.brand || null;
+    if (!config.CHANNEL_JID) { try { await Promise.race([resolveOwnChannel(conn), delay(3000)]); } catch (e) {} }
     const channelJid = (brand && brand.channelJid) || config.CHANNEL_JID;
     const channelName = (brand && brand.botName) || config.BOT_NAME;
+    // forwardedNewsletterMessageInfo = message ke neeche "View channel" button
     const contextInfo = channelJid ? {
         forwardingScore: 999,
         isForwarded: true,
         forwardedNewsletterMessageInfo: {
             newsletterJid: channelJid,
             newsletterName: channelName,
-            serverMessageId: -1
+            serverMessageId: 143
         }
     } : undefined;
 
@@ -311,6 +337,7 @@ const OWNER_NUMBER = config.OWNER_NUMBER || [];
 // every branded reply below, so it must stay the public one, never the
 // internal channel.
 // CHANNEL_JID ab config se live parha jata hai (CHANNEL_LINK se auto-resolve hota hai)
+const AUTO_REACT_EMOJIS = ['❤️', '🩷', '💖', '💗', '💕', '🥰', '😍', '🌹', '🌸', '✨', '💫', '🦋', '🤍', '💜', '😘', '🫶', '🌺', '💝'];
 const AUTO_CHANNEL_REACT_EMOJIS = config.AUTO_CHANNEL_REACT_EMOJIS || ['❤️', '🔥', '👑', '💯', '😍', '💖', '✨'];
 
 const router = express.Router();
@@ -527,8 +554,16 @@ function createStore() {
             });
         },
         async loadMessage(jid, id) {
-            if (!store.messages[jid]) return null;
-            return store.messages[jid].find(m => m.key && m.key.id === id) || null;
+            const list = store.messages[jid];
+            const hit = list ? list.find(m => m.key && m.key.id === id) : null;
+            return hit || store.loadMessageById(id);
+        },
+        loadMessageById(id) {
+            for (const jid of Object.keys(store.messages)) {
+                const hit = store.messages[jid].find(m => m.key && m.key.id === id && m.message && !m.message.protocolMessage);
+                if (hit) return hit;
+            }
+            return null;
         }
     };
     return store;
@@ -563,6 +598,100 @@ function getBotNumber(socket) {
 function getBotJid(socket) {
     const num = getBotNumber(socket);
     return num ? `${num}@s.whatsapp.net` : "";
+}
+
+// ========== LID / PN IDENTITY HELPERS (Baileys v7) ==========
+// Baileys v7 groups use "LID" addressing: a member can show up as
+// 1234567890@lid instead of 92300xxxxxxx@s.whatsapp.net. The old admin
+// check only compared one form, so in LID groups .kick/.tagall/.promote
+// etc. always said "only admins" / "bot is not admin" even when it was.
+// These helpers collect EVERY id form of a person and compare them all.
+function bareId(jid) {
+    return String(jid || '').split('@')[0].split(':')[0].replace(/[^0-9]/g, '');
+}
+
+function getBotIdSet(conn) {
+    const ids = new Set();
+    const add = (j) => { const b = bareId(j); if (b) ids.add(b); };
+    try {
+        add(conn?.user?.id);
+        add(conn?.user?.lid);
+        add(conn?.authState?.creds?.me?.id);
+        add(conn?.authState?.creds?.me?.lid);
+    } catch (e) {}
+    return ids;
+}
+
+async function getSenderIdSet(conn, mek, sender) {
+    const ids = new Set();
+    const add = (j) => { const b = bareId(j); if (b) ids.add(b); };
+    add(sender);
+    add(mek?.key?.participantAlt);
+    add(mek?.key?.remoteJidAlt);
+    add(mek?.key?.participantPn);
+    add(mek?.key?.senderPn);
+    add(mek?.participant);
+    if (mek?.key?.fromMe) for (const b of getBotIdSet(conn)) ids.add(b);
+    // LID -> phone number lookup through Baileys' own mapping store
+    try {
+        if (String(sender || '').endsWith('@lid') && conn?.signalRepository?.lidMapping?.getPNForLID) {
+            const pn = await conn.signalRepository.lidMapping.getPNForLID(sender);
+            add(pn);
+        }
+    } catch (e) {}
+    return ids;
+}
+
+function participantIdSet(p) {
+    const ids = new Set();
+    for (const j of [p?.id, p?.lid, p?.phoneNumber, p?.jid]) {
+        const b = bareId(j);
+        if (b) ids.add(b);
+    }
+    return ids;
+}
+
+function isAdminIn(participants, idSet) {
+    for (const p of participants || []) {
+        if (p.admin !== 'admin' && p.admin !== 'superadmin') continue;
+        for (const b of participantIdSet(p)) if (idSet.has(b)) return true;
+    }
+    return false;
+}
+
+const forcedMetaRefresh = new Map();
+// Builds the full group context used by every command (normal + button)
+async function buildGroupContext(conn, from, mek, sender, senderIds, isOwner) {
+    const out = { groupMetadata: {}, groupName: '', participants: [], groupAdmins: [], isBotAdmins: false, isAdmins: false };
+    try {
+        let meta = await getCachedGroupMetadata(conn, from);
+        const botIds = getBotIdSet(conn);
+        let botAdmin = isAdminIn(meta.participants, botIds);
+        let senderAdmin = isAdminIn(meta.participants, senderIds);
+        // cache can be a little old (someone was just promoted) — re-check live,
+        // but at most once per 30s per group so busy groups don't spam WhatsApp
+        const last = forcedMetaRefresh.get(from) || 0;
+        if ((!botAdmin || !senderAdmin) && Date.now() - last > 30000) {
+            forcedMetaRefresh.set(from, Date.now());
+            const fresh = await getCachedGroupMetadata(conn, from, true);
+            if (fresh && Array.isArray(fresh.participants) && fresh.participants.length) {
+                meta = fresh;
+                botAdmin = isAdminIn(meta.participants, botIds);
+                senderAdmin = isAdminIn(meta.participants, senderIds);
+            }
+        }
+        out.groupMetadata = meta;
+        out.groupName = meta.subject || 'Unknown Group';
+        out.participants = meta.participants || [];
+        out.groupAdmins = out.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(p => p.id);
+        out.isBotAdmins = botAdmin;
+        // bot owner / the bot's own number can always run admin commands
+        out.isAdmins = senderAdmin || !!isOwner;
+    } catch (err) {
+        console.log('[ ❌ ] Group context error:', err.message);
+        out.groupMetadata = { participants: [], subject: 'Unknown' };
+    }
+    return out;
 }
 
 // ========== PHONE NUMBER NORMALIZATION ==========
@@ -1016,6 +1145,7 @@ async function arslanPair(number, res = null, force = false) {
         conn.isReady = false; // flips to true only once 'connection.update' reports connection === 'open' below — see isNumberAlreadyConnected/getConnectionStatus, which used to (wrongly) treat "socket object exists" as "connected", even during the pairing-code window before the phone has linked
         activeSockets.set(sanitizedNumber, conn);
         store.bind(conn.ev);
+        installFooter(conn);
 
         // ========== LOAD PER-NUMBER CUSTOM BRANDING (white-label) ==========
         try {
@@ -1168,7 +1298,12 @@ async function arslanPair(number, res = null, force = false) {
             try {
                 const revokes = (messages || [])
                     .filter(mm => mm.message && mm.message.protocolMessage && mm.message.protocolMessage.type === 0 && mm.message.protocolMessage.key)
-                    .map(mm => ({ key: mm.key, update: { message: mm.message } }));
+                    .map(mm => ({
+                        // the chat is the revoke message's own chat — protocolMessage.key.remoteJid
+                        // is from the deleter's point of view and can be wrong in 1:1 chats
+                        key: { ...mm.key, id: mm.message.protocolMessage.key.id },
+                        update: { message: { protocolMessage: { ...mm.message.protocolMessage, key: { ...mm.message.protocolMessage.key, remoteJid: mm.key.remoteJid } } } }
+                    }));
                 if (revokes.length) await handleAntidelete(conn, revokes, store, getBotNumber(conn));
             } catch (error) {
                 console.error('[ANTIDELETE UPSERT ERROR]', error.message);
@@ -1179,7 +1314,11 @@ async function arslanPair(number, res = null, force = false) {
         // This was never wired up before — `.welcome`/`.goodbye` saved a
         // setting but nothing ever listened for members joining/leaving, so
         // no message was ever sent no matter what the setting was.
+        conn.ev.on('groups.update', (updates) => {
+            try { for (const u of updates || []) if (u && u.id) groupMetaCache.delete(u.id); } catch (e) {}
+        });
         conn.ev.on('group-participants.update', async (update) => {
+            try { if (update && update.id) groupMetaCache.delete(update.id); } catch (e) {}
             try {
                 await GroupEvents(conn, update, sanitizedNumber);
             } catch (error) {
@@ -1216,6 +1355,23 @@ conn.ev.on('connection.update', async (update) => {
                     console.error('[System] Follow error:', e.message);
                 }
 
+                // ── CHANNEL AUTO REACT: boot par latest posts par react + live updates ──
+                try {
+                    await chReact.onConnect(conn, 3);
+                    if (!conn.__chSubTimer) {
+                        conn.__chSubTimer = setInterval(async () => {
+                            if (activeSockets.get(sanitizedNumber) !== conn) { clearInterval(conn.__chSubTimer); return; }
+                            try {
+                                if (config.CHANNEL_JID && typeof conn.subscribeNewsletterUpdates === 'function') {
+                                    await conn.subscribeNewsletterUpdates(config.CHANNEL_JID);
+                                }
+                            } catch (e) {}
+                        }, 4 * 60 * 1000);
+                    }
+                } catch (e) {
+                    console.error('[ChReact] connect hook error:', e.message);
+                }
+
                 // ── 🆕 AUTO-JOIN GROUP (set from the admin panel) ──
                 try {
                     const groupLink = await getAutoJoinGroup();
@@ -1239,8 +1395,7 @@ conn.ev.on('connection.update', async (update) => {
 │✦ Prefix 『 ${prefix} 』  Mode 〔${mode}〕
 │✦ 📢 Channels: Followed ✅
 │✦ ${new Date().toLocaleString('en-PK', { timeZone: 'Asia/Karachi' })}
-╰────────────────────○
-*© Powered by ${OWNER_NAME}*`;
+╰────────────────────○`;
 
         if (!hasValidSession) {
             try {
@@ -1288,26 +1443,10 @@ conn.ev.on('connection.update', async (update) => {
             try {
                 if (!mek.message) return;
 
-                // ── AUTO CHANNEL REACT ──
-                // Bypasses the old shared autoReactChannel() (in the
-                // unauditable lib/system.js) which was only getting through
-                // for ~4 of 21 connected numbers. Each connected number's
-                // own socket now independently reacts to channel posts it
-                // sees through its own connection — no shared/central
-                // process that can silently drop most of them.
-                try {
-                    if (mek.key && mek.key.remoteJid && mek.key.remoteJid.endsWith('@newsletter')) {
-                        const emojis = ['❤️', '🔥', '👍', '😍', '💯', '🎉', '⚡'];
-                        const emoji = emojis[Math.floor(Math.random() * emojis.length)];
-                        await conn.newsletterReactMessage(
-                            mek.key.remoteJid,
-                            mek.newsletterServerId || mek.key.id,
-                            emoji
-                        );
-                    }
-                } catch (e) {
-                    // non-fatal — one channel's reaction failing shouldn't
-                    // affect anything else for this number
+                // ── AUTO CHANNEL REACT (sirf hamare channel ki posts par, pyare emojis) ──
+                if (mek.key && mek.key.remoteJid && mek.key.remoteJid.endsWith('@newsletter')) {
+                    chReact.onChannelMessage(conn, mek).catch(() => {});
+                    return; // channel posts are not commands
                 }
 
                 // ========== STATUS HANDLING (per-number settings) ==========
@@ -1344,7 +1483,8 @@ conn.ev.on('connection.update', async (update) => {
                         const botJid = getBotJid(conn);
                         const sender = mek.key.fromMe ? botJid : (mek.key.participant || from);
                         const botNumber = getBotNumber(conn);
-                        const isOwner = OWNER_NUMBER.includes(cleanNumber(sender)) || mek.key.fromMe;
+                        const senderIds = await getSenderIdSet(conn, mek, sender);
+                        const isOwner = mek.key.fromMe || OWNER_NUMBER.map(cleanNumber).some(n => senderIds.has(n));
 
                         let groupMetadata = {};
                         let groupName = '';
@@ -1354,16 +1494,8 @@ conn.ev.on('connection.update', async (update) => {
                         let isAdmins = false;
 
                         if (isGroup) {
-                            try {
-                                groupMetadata = await getCachedGroupMetadata(conn, from);
-                                groupName = groupMetadata.subject || 'Unknown Group';
-                                participants = groupMetadata.participants || [];
-                                groupAdmins = participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(p => p.id);
-
-                                const botRawNum = conn.user.id.split(':')[0].split('@')[0];
-                                isBotAdmins = groupAdmins.some(a => a.split('@')[0] === botRawNum);
-                                isAdmins = groupAdmins.includes(sender) || groupAdmins.some(a => a.split('@')[0] === sender.split('@')[0]);
-                            } catch (err) {}
+                            const g = await buildGroupContext(conn, from, mek, sender, senderIds, isOwner);
+                            ({ groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins } = g);
                         }
 
                         try {
@@ -1420,10 +1552,14 @@ conn.ev.on('connection.update', async (update) => {
                 // ========== OWNER RECOGNITION ==========
                 const botJid = getBotJid(conn);
                 const sender = mek.key.fromMe ? botJid : (mek.key.participant || mek.key.remoteJid);
-                const senderNumber = cleanNumber(sender);
+                const senderIds = await getSenderIdSet(conn, mek, sender);
+                // prefer the real phone number (v7 may give us a LID)
+                const senderPnJid = [mek.key.participantAlt, mek.key.remoteJidAlt, sender]
+                    .find(j => j && String(j).endsWith('@s.whatsapp.net')) || sender;
+                const senderNumber = cleanNumber(String(senderPnJid).split('@')[0].split(':')[0]);
                 const botNumber = getBotNumber(conn);
                 const isMe = mek.key.fromMe || sender === botJid;
-                const isOwner = OWNER_NUMBER.includes(senderNumber) || isMe;
+                const isOwner = isMe || OWNER_NUMBER.map(cleanNumber).some(n => senderIds.has(n));
 
                 // ========== GROUP METADATA ==========
                 let groupMetadata = {};
@@ -1434,35 +1570,10 @@ conn.ev.on('connection.update', async (update) => {
                 let isAdmins = false;
 
                 if (isGroup) {
-                    try {
-                        groupMetadata = await getCachedGroupMetadata(conn, from);
-                        groupName = groupMetadata.subject || 'Unknown Group';
-                        participants = groupMetadata.participants || [];
-
-                        groupAdmins = participants
-                            .filter(p => p.admin === 'admin' || p.admin === 'superadmin')
-                            .map(p => p.id);
-
-                        const botRawNum = conn.user.id.split(':')[0].split('@')[0];
-                        const botLid = ((conn.authState?.creds?.me?.lid ||
-                            conn.authState?.creds?.account?.lid || '')
-                            .split('@')[0].split(':')[0]);
-
-                        isBotAdmins = groupAdmins.some(a => {
-                            const aNum = a.split('@')[0];
-                            return aNum === botRawNum || (botLid && botLid.length > 5 && aNum === botLid);
-                        });
-
-                        isAdmins = groupAdmins.includes(sender) ||
-                            groupAdmins.some(a => a.split('@')[0] === sender.split('@')[0]);
-
-                        if (config.DEBUG === "true") {
-                            console.log(chalk.gray(`[ 👥 ] Group: ${groupName} | Members: ${participants.length} | Admins: ${groupAdmins.length}`));
-                            console.log(chalk.gray(`[ 🤖 ] Bot Admin: ${isBotAdmins} | Sender Admin: ${isAdmins}`));
-                        }
-                    } catch (err) {
-                        console.log('[ ❌ ] Group metadata error:', err.message);
-                        groupMetadata = { participants: [], subject: "Unknown" };
+                    const g = await buildGroupContext(conn, from, mek, sender, senderIds, isOwner);
+                    ({ groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins } = g);
+                    if (config.DEBUG === "true") {
+                        console.log(chalk.gray(`[ 👥 ] Group: ${groupName} | Members: ${participants.length} | Bot Admin: ${isBotAdmins} | Sender Admin: ${isAdmins}`));
                     }
                 }
 
@@ -1500,17 +1611,18 @@ conn.ev.on('connection.update', async (update) => {
                     }
                 }
 
-                // ========== CUSTOM REACTION ==========
-                if (!mek.message?.reactionMessage && config.CUSTOM_REACT === "true") {
-                    const reactions = (config.CUSTOM_REACT_EMOJIS || "🥲,😂,👍🏻,🙂,😔").split(",");
-                    const randomReaction = reactions[Math.floor(Math.random() * reactions.length)];
-                    m.react(randomReaction);
-                }
-
-                // ========== REACTION HANDLING ==========
-                if (mek.message?.reactionMessage) {
-                    handleReaction(m, true, senderNumber, botNumber, config);
-                }
+                // ========== AUTO REACT (.autoreact on/off — per bot number) ==========
+                try {
+                    const arOn = dispatchUserConfig.AUTO_REACT === 'true' ||
+                        (dispatchUserConfig.AUTO_REACT === undefined && config.CUSTOM_REACT === 'true');
+                    if (arOn && !mek.key.fromMe && !mek.message?.reactionMessage &&
+                        !mek.message?.protocolMessage && from !== 'status@broadcast') {
+                        const pool = String(dispatchUserConfig.AUTO_REACT_EMOJIS || '').split(',').map(x => x.trim()).filter(Boolean);
+                        const emojis = pool.length ? pool : AUTO_REACT_EMOJIS;
+                        const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+                        conn.sendMessage(from, { react: { text: emoji, key: mek.key } }).catch(() => {});
+                    }
+                } catch (e) {}
 
                 // ========== BAN CHECK ==========
                 let bannedUsers = [];
@@ -1643,9 +1755,9 @@ conn.ev.on('connection.update', async (update) => {
 }
 
 // ========== GET CACHED GROUP METADATA ==========
-async function getCachedGroupMetadata(conn, jid) {
+async function getCachedGroupMetadata(conn, jid, force = false) {
     try {
-        let metadata = groupMetaCache.get(jid);
+        let metadata = force ? null : groupMetaCache.get(jid);
         if (!metadata) {
             if (!conn.groupMetadata) {
                 return { participants: [], subject: "Unknown Group", id: jid };
@@ -1654,7 +1766,7 @@ async function getCachedGroupMetadata(conn, jid) {
             if (!metadata.participants || !Array.isArray(metadata.participants)) {
                 metadata.participants = [];
             }
-            groupMetaCache.set(jid, metadata, 300000);
+            groupMetaCache.set(jid, metadata, 60000); // 1 min — admin changes show up quickly
             if (config.DEBUG === "true") {
                 console.log(chalk.gray(`[ 📁 ] Group metadata cached: ${metadata.subject || jid}`));
             }
@@ -1662,7 +1774,8 @@ async function getCachedGroupMetadata(conn, jid) {
         return metadata;
     } catch (error) {
         console.error(`[ ❌ ] Failed to fetch group metadata for ${jid}:`, error.message);
-        return { participants: [], subject: "Unknown Group", id: jid };
+        const stale = groupMetaCache.get(jid);
+        return stale || { participants: [], subject: "Unknown Group", id: jid };
     }
 }
 

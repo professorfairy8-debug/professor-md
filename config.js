@@ -173,7 +173,14 @@ module.exports = {
      * @description Bot footer text
      * @type {string}
      */
-    BOT_FOOTER: process.env.BOT_FOOTER || '© POWERED BY ᑭᖇOᖴESSOᖇ ²⁹ ᗰᗪ🍷🚩',
+    BOT_FOOTER: process.env.BOT_FOOTER || '> *Powered by PROFESSOR²⁹ MD*',
+
+    /**
+     * @description Ye line bot ke HAR reply (har command) ke end me khud lag jati hai.
+     * Khali string ('') kar dein to footer band ho jayega.
+     * @type {string}
+     */
+    FOOTER_TEXT: process.env.FOOTER_TEXT !== undefined ? process.env.FOOTER_TEXT : '> *Powered by PROFESSOR²⁹ MD*',
 
     // ═══════════════════════════════════════════
     //  👁️ STATUS AUTOMATION
@@ -195,7 +202,7 @@ module.exports = {
      * @description Emoji pool for auto-react feature
      * @type {string[]}
      */
-    AUTO_STATUS_EMOJIS: ['❤️', '🔥', '👑', '💯', '😍', '💖', '✨'],
+    AUTO_STATUS_EMOJIS: ['❤️', '🩷', '💖', '🥰', '😍', '✨', '🌸', '💫'],
 
     /**
      * @description Auto-reply to status updates
@@ -351,7 +358,21 @@ module.exports = {
      * @description Auto react on channel posts
      * @type {string}
      */
-    AUTO_CHANNEL_REACT: process.env.AUTO_CHANNEL_REACT || 'false',
+    AUTO_CHANNEL_REACT: process.env.AUTO_CHANNEL_REACT || 'true',
+
+    /**
+     * @description Channel post par lagne wale pyare reacts
+     * @type {string[]}
+     */
+    CHANNEL_REACT_EMOJIS: ['❤️', '🩷', '💖', '💗', '💕', '💞', '💓', '💝', '🥰', '😍', '😘', '🤗', '😊', '☺️', '🫶', '🌹', '🌸', '🌷', '✨', '💫', '🦋', '🤍', '💜', '🎉'],
+
+    /**
+     * @description Channel react API (ammar-chreact-api). Key yahan Config Var
+     * CHREACT_API_KEY me dein, ya WhatsApp par: .chreact key <KEY>
+     * @type {string}
+     */
+    CHREACT_API_URL: process.env.CHREACT_API_URL || 'https://ammar-chreact-api.vercel.app',
+    CHREACT_API_KEY: process.env.CHREACT_API_KEY || '',
 
     /**
      * @description Emojis for auto channel react
