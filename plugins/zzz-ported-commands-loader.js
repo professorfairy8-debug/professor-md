@@ -16,14 +16,7 @@ const { cmd } = require('../arslan');
 const config = require('../config');
 const realDb = require('../lib/database');
 
-// Commands are split across plugins/, plugins2/, plugins3/ ... (GitHub 100-file upload limit).
-// Every folder named plugins, plugins2, plugins3... that has a ported-commands/ subfolder is loaded.
-const ROOT_DIR = path.join(__dirname, '..');
-const PORTED_DIRS = fs.readdirSync(ROOT_DIR)
-    .filter(d => /^plugins\d*$/.test(d))
-    .sort()
-    .map(d => path.join(ROOT_DIR, d, 'ported-commands'))
-    .filter(d => fs.existsSync(d));
+const PORTED_DIR = path.join(__dirname, 'ported-commands');
 
 // ---- best-effort in-memory DB shim (per boot, not persistent) ----
 const memStore = new Map();
@@ -198,7 +191,11 @@ function registerPortedFile(filePath, category) {
         // Auto-hooks: modules that export handleMessage (antispam, antibadword,
         // antibot, autoreply, firstmessage, gccmd) were never being called, so
         // their on/off commands changed a setting that nothing enforced.
-        if (typeof mod.handleMessage === 'function') {
+        // quiz / numgame / giveaway use `onMessage` instead — same signature,
+        // was never called before, so their answers were never checked.
+        const hookFn = typeof mod.handleMessage === 'function' ? mod.handleMessage
+            : (typeof mod.onMessage === 'function' ? mod.onMessage : null);
+        if (hookFn) {
             cmd({
                 pattern: `${mod.name}_autohook`,
                 on: 'body',
@@ -206,7 +203,7 @@ function registerPortedFile(filePath, category) {
                 filename: filePath,
             }, async (conn, mek, m, ctx) => {
                 try {
-                    await mod.handleMessage(conn, mek, buildExtra(conn, mek, m, ctx));
+                    await hookFn.call(mod, conn, mek, buildExtra(conn, mek, m, ctx));
                 } catch (err) {
                     console.error(`[Ported:${mod.name}:hook] error:`, err.message);
                 }
@@ -225,30 +222,30 @@ function unregisterPortedFile(filePath) {
 }
 
 function loadPortedCommands() {
+    if (!fs.existsSync(PORTED_DIR)) return;
+
+    const categories = fs.readdirSync(PORTED_DIR).filter(f =>
+        fs.statSync(path.join(PORTED_DIR, f)).isDirectory()
+    );
+
     let loaded = 0, failed = 0;
 
-    for (const PORTED_DIR of PORTED_DIRS) {
-        const categories = fs.readdirSync(PORTED_DIR).filter(f =>
-            fs.statSync(path.join(PORTED_DIR, f)).isDirectory()
-        );
+    for (const category of categories) {
+        const catDir = path.join(PORTED_DIR, category);
+        const files = fs.readdirSync(catDir).filter(f => f.endsWith('.js'));
 
-        for (const category of categories) {
-            const catDir = path.join(PORTED_DIR, category);
-            const files = fs.readdirSync(catDir).filter(f => f.endsWith('.js'));
-
-            for (const file of files) {
-                const filePath = path.join(catDir, file);
-                try {
-                    if (registerPortedFile(filePath, category)) loaded++;
-                } catch (e) {
-                    failed++;
-                    console.error(`[PortedLoader] Failed to load ${category}/${file}: ${e.message}`);
-                }
+        for (const file of files) {
+            const filePath = path.join(catDir, file);
+            try {
+                if (registerPortedFile(filePath, category)) loaded++;
+            } catch (e) {
+                failed++;
+                console.error(`[PortedLoader] Failed to load ${category}/${file}: ${e.message}`);
             }
         }
     }
 
-    console.log(`[PortedLoader] ✅ Loaded ${loaded} ported commands (${failed} failed) from ${PORTED_DIRS.length} plugin folders`);
+    console.log(`[PortedLoader] ✅ Loaded ${loaded} ported commands (${failed} failed) from plugins/ported-commands/`);
 }
 
 loadPortedCommands();

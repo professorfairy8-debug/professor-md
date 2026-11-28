@@ -8,7 +8,8 @@ const categoryIcons = {
     system: "⚙️", general: "🌐", owner: "👑", group: "👥",
     admin: "🛡️", download: "📥", downloader: "📥", fun: "🎉",
     search: "🔍", tools: "🧰", sticker: "🖼️", ai: "🤖",
-    convert: "🔄", nsfw: "🔞", anti: "🚫", other: "✨"
+    convert: "🔄", nsfw: "🔞", anti: "🚫", other: "✨",
+    text: "🔤", islamic: "🕌", games: "🎮", settings: "⚙️"
 };
 
 // ============================================================
@@ -18,27 +19,27 @@ const categoryIcons = {
 const THEMES = [
     // 1. Classic sharp box
     {
-        header: (n, o, c, t, d) => `╭━━━❰ *${n}* ❱━━━┈⊷\n┃\n┃ 👑 *Owner*    : ${o}\n┃ 📦 *Commands* : *${c}*\n┃ ⏰ *Time*     : ${t}\n┃ 📅 *Date*     : ${d}\n┃ 🚀 *Platform* : ᑭᖇOᖴESSOᖇ ²⁹ ᗰᗪ🍷🚩\n┃\n╰━━━━━━━━━━━━━━━━━━━┈⊷`,
+        header: (n, o, c, t, d) => `╭━━━❰ *${n}* ❱━━━┈⊷\n┃\n┃ *Owner*    : ${o}\n┃ 📦 *Commands* : *${c}*\n┃ ⏰ *Time*     : ${t}\n┃ 📅 *Date*     : ${d}\n┃ 🚀 *Platform* : ᑭᖇOᖴESSOᖇ ²⁹ ᗰᗪ🍷🚩\n┃\n╰━━━━━━━━━━━━━━━━━━━┈⊷`,
         cat: (icon, cat) => `\n╭─❖ ${icon} *${cat}* ❖─╮`,
         bullet: c => `│ ➤ ${c}`,
         catEnd: `╰────────────────╯`,
-        footer: n => `━━━━━━━━━━━━━━━━━━━\n   *Powered By ${n}*\n━━━━━━━━━━━━━━━━━━━`
+        footer: n => ``
     },
     // 2. Double-line formal box
     {
-        header: (n, o, c, t, d) => `╔══════════════════╗\n║  *${n}*\n╠══════════════════╣\n║ 👑 Owner    : ${o}\n║ 📦 Commands : *${c}*\n║ ⏰ Time     : ${t}\n║ 📅 Date     : ${d}\n╚══════════════════╝`,
+        header: (n, o, c, t, d) => `╔══════════════════╗\n║  *${n}*\n╠══════════════════╣\n║ Owner    : ${o}\n║ 📦 Commands : *${c}*\n║ ⏰ Time     : ${t}\n║ 📅 Date     : ${d}\n╚══════════════════╝`,
         cat: (icon, cat) => `\n▓▒░ ${icon} *${cat}* ░▒▓`,
         bullet: c => `  ▸ ${c}`,
         catEnd: ``,
-        footer: n => `╔══════════════════╗\n║  *${n}* — Powered\n╚══════════════════╝`
+        footer: n => ``
     },
     // 3. Rounded dotted style
     {
-        header: (n, o, c, t, d) => `╭┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╮\n┊ 🌸 *${n}* 🌸\n┊ 👑 ${o}\n┊ 📦 ${c} Commands\n┊ ⏰ ${t} • 📅 ${d}\n╰┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╯`,
+        header: (n, o, c, t, d) => `╭┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╮\n┊ *${n}*\n┊ ${o}\n┊ 📦 ${c} Commands\n┊ ⏰ ${t} • 📅 ${d}\n╰┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈╯`,
         cat: (icon, cat) => `\n✧───「 ${icon} *${cat}* 」───✧`,
         bullet: c => `   ✧ ${c}`,
         catEnd: ``,
-        footer: n => `┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈\n   made with 🌸 ${n}\n┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈`
+        footer: n => ``
     },
     // 4. Star themed
     {
@@ -46,7 +47,7 @@ const THEMES = [
         cat: (icon, cat) => `\n☆彡 ${icon} *${cat}* 彡☆`,
         bullet: c => `  ⋆ ${c}`,
         catEnd: ``,
-        footer: n => `★═══════════════★\n  *${n}* ⭐\n★═══════════════★`
+        footer: n => ``
     },
     // 5. Neon bracket style
     {
@@ -54,7 +55,7 @@ const THEMES = [
         cat: (icon, cat) => `\n『 ${icon} *${cat}* 』`,
         bullet: c => `  ⟡ ${c}`,
         catEnd: ``,
-        footer: n => `『 *${n}* 』`
+        footer: n => ``
     },
     // 6. Minimalist clean lines
     {
@@ -62,15 +63,15 @@ const THEMES = [
         cat: (icon, cat) => `\n── ${icon} ${cat} ──`,
         bullet: c => `• ${c}`,
         catEnd: ``,
-        footer: n => `── Powered by ${n} ──`
+        footer: n => ``
     },
     // 7. Emoji-heavy fun style
     {
-        header: (n, o, c, t, d) => `🌟━━━━━━━━━━━━🌟\n✨ *${n}* ✨\n🌟━━━━━━━━━━━━🌟\n👑 ${o}\n📦 ${c} commands loaded!\n⏰ ${t} 📅 ${d}`,
+        header: (n, o, c, t, d) => `🌟━━━━━━━━━━━━🌟\n✨ *${n}* ✨\n🌟━━━━━━━━━━━━🌟\n${o}\n📦 ${c} commands loaded!\n⏰ ${t} 📅 ${d}`,
         cat: (icon, cat) => `\n🎈 ${icon} *${cat}* 🎈`,
         bullet: c => `   🌟 ${c}`,
         catEnd: ``,
-        footer: n => `🎉 *${n}* 🎉\n🌟━━━━━━━━━━━━🌟`
+        footer: n => ``
     },
     // 8. Retro terminal style
     {
@@ -78,7 +79,7 @@ const THEMES = [
         cat: (icon, cat) => `\n[ ${cat.toLowerCase()} ]`,
         bullet: c => `  >> ${c}`,
         catEnd: ``,
-        footer: n => `----------------\n[ powered by ${n} ]`
+        footer: n => ``
     },
     // 9. Elegant floral
     {
@@ -86,7 +87,7 @@ const THEMES = [
         cat: (icon, cat) => `\n❦ ${icon} *${cat}*`,
         bullet: c => `   ❧ ${c}`,
         catEnd: ``,
-        footer: n => `❦───────────────❦\n   ${n}\n❦───────────────❦`
+        footer: n => ``
     },
     // 10. Futuristic block style
     {
@@ -94,7 +95,7 @@ const THEMES = [
         cat: (icon, cat) => `\n▓▒░ ${icon} *${cat}*`,
         bullet: c => `   ▹ ${c}`,
         catEnd: ``,
-        footer: n => `▓▒░━━━━━━━━━━░▒▓\n   ${n}\n▓▒░━━━━━━━━━━░▒▓`
+        footer: n => ``
     }
 ];
 
@@ -118,6 +119,9 @@ cmd({
                 (c.use ? `\n⚙️ Usage: ${c.use}` : ''));
         }
         const brand = conn.brand || null;
+        if (!config.CHANNEL_JID) {
+            try { await Promise.race([require('../lib/chreact').resolveChannelJid(conn), new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
+        }
         const botDisplayName = (brand && brand.botName) || config.BOT_NAME || 'ᑭᖇOᖴESSOᖇ ²⁹ ᗰᗪ🍷🚩';
         const channelJid = (brand && brand.channelJid) || config.CHANNEL_JID;
 
@@ -154,11 +158,7 @@ cmd({
         const caption = `${theme.header(botDisplayName, ownerText, totalCommands, time, date)}
 
 *✨ Type ${pfx}help <command> for details ✨*
-${menuText}
-📢 *Channel Join Karein:*
-${(brand && brand.channelLink) || config.CHANNEL_LINK}
-
-${theme.footer(botDisplayName)}`.trim();
+${menuText}`.trim();
 
         const imgTarget = (brand && brand.botImage) || config.IMAGE_PATH;
         let menuImageSource;
@@ -181,7 +181,7 @@ ${theme.footer(botDisplayName)}`.trim();
                 forwardedNewsletterMessageInfo: {
                     newsletterJid: liveChannelJid,
                     newsletterName: botDisplayName,
-                    serverMessageId: 2,
+                    serverMessageId: 143,
                 }
             }
         };

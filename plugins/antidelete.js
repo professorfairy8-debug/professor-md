@@ -26,7 +26,7 @@ cmd({
                         `Usage: .antidelete <on/off>\n` +
                         `Example: .antidelete on\n\n` +
                         `Current Status: ${global.antideleteStatus || 'ON'}\n\n` +
-                        `⚠️ Deleted messages will be sent to owner's inbox only.`);
+                        `⚠️ Deleted messages aapki "You" chat (Message yourself) me aayenge.`);
         }
         
         const status = action === 'on' || action === 'enable' ? 'true' : 'false';
@@ -38,7 +38,7 @@ cmd({
         global.antideleteStatus = status === 'true' ? 'ON' : 'OFF';
         
         reply(`✅ Antidelete ${status === 'true' ? 'enabled' : 'disabled'} successfully!\n\n` +
-              `📩 Deleted messages will be sent to owner's inbox only.`);
+              `📩 Deleted messages aapki "You" chat (Message yourself) me aayenge.`);
         
     } catch (error) {
         console.error("Antidelete command error:", error.message);
@@ -66,11 +66,11 @@ cmd({
         
         const userNumber = String(botNumber || sender.split('@')[0]).replace(/\D/g, '');
         const config = await getUserConfigFromMongoDB(userNumber);
-        const status = config.ANTIDELETE || 'true';
+        const status = (config && config.ANTIDELETE) || 'true';
         
         reply(`📊 *Antidelete Status*\n\n` +
               `🔹 Status: ${status === 'true' ? '✅ ENABLED' : '❌ DISABLED'}\n` +
-              `📩 Delivery: Owner's Inbox Only\n` +
+              `📩 Delivery: "You" chat (Message yourself)\n` +
               `👤 Owner: @${sender.split('@')[0]}\n\n` +
               `To change: .antidelete on/off`);
               

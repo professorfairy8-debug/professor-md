@@ -41,7 +41,7 @@ cmd({
           key: msg.key,
           type: 14,
           editedMessage: {
-            conversation: `*👑 SPEED :❯ ${ping}ms 👑*`
+            conversation: `*👑 SPEED :❯ ${ping}ms 👑*\n\n${require('../config').FOOTER_TEXT || ''}`
           }
         }
       }, {});

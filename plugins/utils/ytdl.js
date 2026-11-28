@@ -68,6 +68,7 @@ const PROVIDERS = {
 };
 
 async function fetchFile(url) {
+    if (/youtube\.com|youtu\.be/i.test(url)) throw new Error('got a youtube page, not a file');
     const res = await axios.get(url, {
         responseType: 'arraybuffer',
         timeout: 120000,
@@ -75,9 +76,10 @@ async function fetchFile(url) {
         maxBodyLength: MAX_BYTES,
         headers: { 'User-Agent': UA },
     });
+    const type = String(res.headers['content-type'] || '').toLowerCase();
+    if (/text\/html|application\/json|image\//.test(type)) throw new Error(`not a media file (${type})`);
     const buf = Buffer.from(res.data);
-    if (!buf.length || buf.length < 2000) throw new Error('empty file');
-    // some providers answer with a JSON/HTML error page and status 200
+    if (!buf.length || buf.length < 20000) throw new Error('empty/too small file');
     const head = buf.slice(0, 15).toString('utf8').trim().toLowerCase();
     if (head.startsWith('{') || head.startsWith('<')) throw new Error('not a media file');
     return buf;
@@ -108,30 +110,61 @@ async function viaYtdlCore(url, kind) {
  * @param {'audio'|'video'} kind
  * @returns {{buffer:Buffer,title:string|null,source:string}}
  */
+// One provider: API -> link -> file
+async function tryProvider(build, url, kind) {
+    const apiUrl = build(url);
+    const host = apiUrl.split('/')[2];
+    const r = await axios.get(apiUrl, HTTP);
+    let link = pickUrl(r.data, kind);
+    if (host.includes('tioo') && r.data) link = kind === 'audio' ? (r.data.mp3 || r.data.mp4 || link) : (r.data.mp4 || link);
+    if (!link) throw new Error(`${host}: no link in response`);
+    const buffer = await fetchFile(link);
+    return { buffer, title: pickTitle(r.data), source: host };
+}
+
+async function viaRuhend(url, kind) {
+    const rs = require('ruhend-scraper');
+    const d = kind === 'audio' ? await rs.ytmp3(url) : await rs.ytmp4(url);
+    const link = kind === 'audio' ? (d && (d.audio || d.download)) : (d && (d.video || d.download));
+    if (!link) throw new Error('ruhend: no link');
+    return { buffer: await fetchFile(link), title: d.title || null, source: 'ruhend-scraper' };
+}
+
+function withTimeout(p, ms, label) {
+    return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${label}: timeout`)), ms))]);
+}
+
+/**
+ * Saare servers EK SAATH try hote hain (pehle ek ek kar ke hote the — 9 servers
+ * x 45s = minutes lag jate the aur user ko "error" lagta tha). Jo pehle
+ * sahi file de, wahi use hoti hai.
+ * @param {string} url   YouTube url
+ * @param {'audio'|'video'} kind
+ */
 async function downloadYoutube(url, kind = 'audio') {
     const errors = [];
-    for (const build of PROVIDERS[kind]) {
-        const apiUrl = build(url);
-        const host = apiUrl.split('/')[2];
-        try {
-            const r = await axios.get(apiUrl, HTTP);
-            let link = pickUrl(r.data, kind);
-            // tioo backend uses {mp3, mp4}; pickUrl handles it, but prefer the right key
-            if (host.includes('tioo') && r.data) link = kind === 'audio' ? (r.data.mp3 || r.data.mp4 || link) : (r.data.mp4 || link);
-            if (!link) throw new Error('no link in response');
-            const buffer = await fetchFile(link);
-            return { buffer, title: pickTitle(r.data), source: host };
-        } catch (e) {
-            errors.push(`${host}: ${e.message}`);
-        }
-    }
+    // Apni pasand ki API: Config Var SONG_API / VIDEO_API, jaise
+    //   https://example.com/ytmp3?url={url}   ({url} ki jagah YouTube link aata hai)
+    const custom = process.env[kind === 'audio' ? 'SONG_API' : 'VIDEO_API'];
+    const list = custom && custom.includes('{url}')
+        ? [(u) => custom.replace('{url}', enc(u)), ...PROVIDERS[kind]]
+        : PROVIDERS[kind];
+    const jobs = list.map(build =>
+        withTimeout(tryProvider(build, url, kind), 150000, build(url).split('/')[2])
+            .catch(e => { errors.push(e.message); throw e; })
+    );
+    jobs.push(withTimeout(viaRuhend(url, kind), 150000, 'ruhend').catch(e => { errors.push(e.message); throw e; }));
     try {
-        const r = await viaYtdlCore(url, kind);
+        return await Promise.any(jobs);
+    } catch (e) { /* all failed */ }
+
+    try {
+        const r = await withTimeout(viaYtdlCore(url, kind), 150000, 'ytdl-core');
         if (r.buffer && r.buffer.length) return { ...r, source: 'ytdl-core' };
     } catch (e) {
         errors.push(`ytdl-core: ${e.message}`);
     }
-    const err = new Error('All download servers failed right now. Please try again in a minute.');
+    const err = new Error('Abhi saare download servers busy hain, 1 minute baad dobara try karein.');
     err.details = errors;
     console.error('[ytdl] all providers failed:', errors.join(' | '));
     throw err;

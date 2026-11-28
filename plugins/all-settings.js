@@ -160,7 +160,7 @@ async(conn, mek, m, { args, isOwner, reply, botNumber, config }) => {
 
 cmd({
     pattern: "autoviewsview",
-    alias: ["avs", "statusseen", "astatus"],
+    alias: ["avs", "statusseen", "astatus", "autostatusview", "statusview"],
     desc: "Auto view status updates",
     category: "settings",
     react: "😎"

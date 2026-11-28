@@ -23,12 +23,8 @@ function loadCommands() {
 
     // ported commands (module.exports = {name, category, execute})
     try {
-        const rootDir = path.join(__dirname, '..', '..');
-        const portedDirs = fs.readdirSync(rootDir)
-            .filter(d => /^plugins\d*$/.test(d))
-            .map(d => path.join(rootDir, d, 'ported-commands'))
-            .filter(d => fs.existsSync(d));
-        for (const portedDir of portedDirs) {
+        const portedDir = path.join(__dirname, '..', 'ported-commands');
+        if (fs.existsSync(portedDir)) {
             for (const category of fs.readdirSync(portedDir)) {
                 const catDir = path.join(portedDir, category);
                 if (!fs.statSync(catDir).isDirectory()) continue;

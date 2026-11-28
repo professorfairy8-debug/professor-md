@@ -54,25 +54,25 @@ cmd({
         const isUrl = /youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/|youtube\.com\/embed\//.test(input);
 
         let videoUrl = input;
-        let searchAuthor = null;
+        let title = "YouTube Video", author = "Unknown";
         if (!isUrl) {
-            const s = await fetchWithRetry(`https://backend1.tioo.eu.org/yts?q=${encodeURIComponent(input)}`, {}, 3, 15000);
-            if (!s.data?.status || !s.data?.videos?.length) return reply("❌ No videos found for your query.");
-            videoUrl = s.data.videos[0].url;
-            searchAuthor = s.data.videos[0].author?.name || null;
+            const yts = require("yt-search");
+            const s = await yts(input);
+            const v = s && s.videos && s.videos[0];
+            if (!v) return reply("❌ Is naam se koi video nahi mili.");
+            if (v.seconds && v.seconds > 900) return reply("❌ Video bohat lambi hai (15 min se zyada). Koi choti video try karein.");
+            videoUrl = v.url; title = v.title; author = v.author?.name || author;
         }
 
-        const d = await fetchWithRetry(`https://backend1.tioo.eu.org/YouTube?url=${encodeURIComponent(videoUrl)}`, {}, 3, 20000);
-        if (!d.data?.status || !d.data?.mp4) return reply("❌ Could not extract the video. Try another link.");
-
-        const title = d.data.title || "YouTube Video";
-        const author = d.data.author || searchAuthor || "Unknown";
+        await reply(`⏳ *${title}* download ho rahi hai...`);
+        const { downloadYoutube } = require("./utils/ytdl");
+        const res = await downloadYoutube(videoUrl, "video");
 
         await conn.sendMessage(from, {
-            video: { url: d.data.mp4 },
+            video: res.buffer,
             mimetype: "video/mp4",
-            caption: `🎬 *${title}*\n👤 *Author:* ${author}\n\n${config.BOT_NAME}`
-        }, { quoted: fakevCard });
+            caption: `🎬 *${res.title || title}*\n👤 *Author:* ${author}`
+        }, { quoted: mek });
     } catch (e) {
         console.error("YT Error:", e.message);
         reply("❌ Failed to download. " + (e.code === "ECONNABORTED" ? "Request timed out." : e.message));

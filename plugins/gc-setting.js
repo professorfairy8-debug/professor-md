@@ -183,32 +183,70 @@ async (conn, mek, m, { from, quoted, body, isCmd, command, args, q, isGroup, sen
 });
 
 // ==================== FIXED KICK COMMAND ====================
+// Works with LID groups (Baileys v7): target can be a mention, a reply,
+// or a number typed after the command. Never kicks the bot or the owner.
+function _bare(j) { return String(j || '').split('@')[0].split(':')[0].replace(/\D/g, ''); }
+function _ids(p) { return [p?.id, p?.lid, p?.phoneNumber, p?.jid].map(_bare).filter(Boolean); }
+function _findParticipant(participants, jid) {
+    const b = _bare(jid);
+    if (!b) return null;
+    return (participants || []).find(p => _ids(p).includes(b)) || null;
+}
+
 cmd({
     pattern: "kick",
-    alias: ["remove","k"],
-    desc: "Remove a group member",
+    alias: ["remove", "k"],
+    desc: "Remove a group member (mention / reply / number)",
     category: "admin",
     react: "🗑️",
     filename: __filename
 },
-async (conn, mek, m, { from, isGroup, isAdmins, isBotAdmins, reply, mentionedJid, quoted }) => {
+async (conn, mek, m, { from, isGroup, isAdmins, isBotAdmins, reply, mentionedJid, quoted, q, participants }) => {
     try {
-        if (!isGroup) return reply("❌ This command only works in groups.");
-        if (!isAdmins) return reply("❌ Only group admins can use this command.");
-        if (!isBotAdmins) return reply("❌ I need admin rights to remove members.");
+        if (!isGroup) return reply("❌ Ye command sirf group me chalti hai.");
+        if (!isAdmins) return reply("❌ Sirf group admins ye command use kar sakte hain.");
+        if (!isBotAdmins) return reply("❌ Pehle bot ko group admin banayein, phir kick ho sakega.");
 
-        const target = quoted?.sender || mentionedJid?.[0];
-        if (!target) return reply("❌ Reply to a message or mention a user!");
+        let targets = [];
+        if (mentionedJid && mentionedJid.length) targets = [...mentionedJid];
+        else if (quoted && quoted.sender) targets = [quoted.sender];
+        else if (q) {
+            const nums = String(q).match(/\d{7,16}/g) || [];
+            targets = nums.map(n => (n.startsWith('03') && n.length === 11 ? '92' + n.slice(1) : n) + '@s.whatsapp.net');
+        }
+        if (!targets.length) return reply("❌ Kisi member ko mention karein, us ke message par reply karein, ya number likhein.\nExample: .kick @user");
 
-        await conn.groupParticipantsUpdate(from, [target], "remove");
-        await conn.sendMessage(from, {
-            text: `🚫 @${target.split("@")[0]} has been removed!`,
-            mentions: [target]
-        }, { quoted: m });
+        const protectedIds = new Set([
+            _bare(conn.user?.id), _bare(conn.user?.lid),
+            _bare(conn.authState?.creds?.me?.lid),
+            ...[].concat(config.OWNER_NUMBER || []).map(_bare)
+        ].filter(Boolean));
 
+        const done = [], skipped = [];
+        for (const t of [...new Set(targets)]) {
+            const p = _findParticipant(participants, t);
+            const ids = p ? _ids(p) : [_bare(t)];
+            if (ids.some(x => protectedIds.has(x))) { skipped.push(t); continue; }
+            const jid = p ? p.id : t; // use the id the group itself uses (LID or PN)
+            try {
+                await conn.groupParticipantsUpdate(from, [jid], "remove");
+                done.push(jid);
+            } catch (e) {
+                console.error("Kick error:", e.message);
+                skipped.push(t);
+            }
+        }
+
+        if (done.length) {
+            await conn.sendMessage(from, {
+                text: `🚫 ${done.map(j => '@' + j.split('@')[0]).join(', ')} ko group se nikal diya gaya!`,
+                mentions: done
+            }, { quoted: mek });
+        }
+        if (skipped.length && !done.length) return reply("❌ Is member ko remove nahi kiya ja saka (bot / owner ya member group me nahi).");
     } catch (error) {
         console.error("Kick error:", error.message);
-        reply("❌ Failed to remove member.");
+        reply("❌ Member remove nahi ho saka: " + error.message);
     }
 });
 
@@ -226,10 +264,14 @@ async (conn, mek, m, { from, isGroup, isAdmins, isBotAdmins, reply, participants
         if (!isAdmins) return reply("❌ Only admins can use this!");
         if (!isBotAdmins) return reply("❌ I need to be admin!");
 
-        const admins = participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(p => p.id);
-        const botJid = conn.user.id.includes(':') ? conn.user.id.split(':')[0] + "@s.whatsapp.net" : conn.user.id;
-        
-        const toKick = participants.map(p => p.id).filter(id => !admins.includes(id) && id !== botJid);
+        const protectedIds = new Set([
+            _bare(conn.user?.id), _bare(conn.user?.lid), _bare(conn.authState?.creds?.me?.lid),
+            ...[].concat(config.OWNER_NUMBER || []).map(_bare)
+        ].filter(Boolean));
+        const toKick = participants
+            .filter(p => !(p.admin === 'admin' || p.admin === 'superadmin'))
+            .filter(p => !_ids(p).some(x => protectedIds.has(x)))
+            .map(p => p.id);
 
         if (toKick.length === 0) return reply("✅ No non-admin members to remove.");
 
@@ -267,10 +309,11 @@ async (conn, mek, m, {
 
         const botOwner = conn.user.id.split(":")[0];
         const allParticipants = groupMetadata.participants;
-        const adminParticipants = allParticipants.filter(member => 
-            groupAdmins.includes(member.id) && 
-            member.id !== conn.user.id && 
-            member.id !== `${botOwner}@s.whatsapp.net`
+        const ownerIds = new Set([].concat(config.OWNER_NUMBER || []).map(_bare));
+        const adminParticipants = allParticipants.filter(member =>
+            (member.admin === 'admin' || member.admin === 'superadmin') &&
+            !require('../lib/lid').isBotParticipant(conn, member) &&
+            !_ids(member).some(x => ownerIds.has(x))
         );
 
         if (adminParticipants.length === 0) {
@@ -439,7 +482,7 @@ try {
     // Check if bot is already admin  
     try {  
         const groupMetadata = await conn.groupMetadata(from);  
-        const botParticipant = groupMetadata.participants.find(p => p.id === conn.user.id);  
+        const botParticipant = groupMetadata.participants.find(p => require('../lib/lid').isBotParticipant(conn, p));  
         if (botParticipant && botParticipant.admin) {  
             return reply("✅ Bot is already admin in this group!");  
         }  
@@ -556,16 +599,15 @@ from,
 participants,
 reply,
 isGroup,
-body,
-command,
+q,
 isAdmins
 }) => {
 try {
     if (!isGroup) return reply("⚠️ This command only works in groups.");
     if (!isAdmins) return reply("❌ Only group admins can use this command.");
 
-    let message = body.slice(body.indexOf(command) + command.length).trim();  
-    if (!message) message = "Attention Everyone!";  
+    let message = (q || '').trim();
+    if (!message) message = "Attention Everyone!";
     
     let text = `📢 *TAG ALL*\n\n📝 Message: ${message}\n\n`;  
     
@@ -575,10 +617,10 @@ try {
     
     text += `\n✅ Total: ${participants.length} members`;  
     
-    await conn.sendMessage(from, {  
-        text: text,  
-        mentions: participants.map(p => p.id)  
-    }, { quoted: fakevCard });
+    await conn.sendMessage(from, {
+        text: text,
+        mentions: participants.map(p => p.id)
+    }, { quoted: mek });
 
 } catch (err) {
     console.error("TagAll Error:", err.message);
@@ -753,7 +795,7 @@ try {
 // ==================== FIXED END COMMAND ====================
 cmd({
     pattern: "end",
-    alias: ["byeall", "kickall", "endgc"],
+    alias: ["byeall", "endgc"],
     desc: "Removes all members (including admins) from the group except specified numbers",
     category: "admin",
     react: "⚠️",
@@ -772,11 +814,13 @@ async (conn, mek, m, {
         // regardless of who deploys/owns this bot. Replaced with whatever
         // OWNER_NUMBER(s) are actually configured for *this* deployment, so
         // it protects the real owner instead of someone else's number.
-        const ignoreJids = (Array.isArray(config.OWNER_NUMBER) ? config.OWNER_NUMBER : [])
-            .map(n => `${String(n).replace(/[^0-9]/g, '')}@s.whatsapp.net`);
+        const protectedIds = new Set([
+            _bare(conn.user?.id), _bare(conn.user?.lid), _bare(conn.authState?.creds?.me?.lid),
+            ...[].concat(config.OWNER_NUMBER || []).map(_bare)
+        ].filter(Boolean));
 
         const participants = groupMetadata.participants || [];
-        const targets = participants.filter(p => !ignoreJids.includes(p.id));
+        const targets = participants.filter(p => !_ids(p).some(x => protectedIds.has(x)));
         const jids = targets.map(p => p.id);
 
         if (jids.length === 0) return reply("✅ No members to remove.");
