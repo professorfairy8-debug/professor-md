@@ -287,8 +287,12 @@ async function brandedReply(conn, from, mek, text) {
         }
     } : undefined;
 
+    // WhatsApp image captions get cut / fail when they are very long (fancy, lists...)
+    // -> long replies go as a normal text message (still with "View channel")
+    const tooLong = Array.from(text).length > 900;
+
     // 1st try: branded image + caption (the bot's usual look)
-    try {
+    if (!tooLong) try {
         const imgSrc = await resolveBrandImage(brand);
         if (imgSrc && (Buffer.isBuffer(imgSrc) || imgSrc.url)) {
             return await conn.sendMessage(from, {
@@ -455,6 +459,7 @@ const userCache = new SmartCache(200, 300000);
 
 // ========== ACTIVE SESSIONS ==========
 const activeSockets = new Map();
+global.__p29Sockets = activeSockets; // used by .botstats / .sessions
 const socketCreationTime = new Map();
 
 // ========== CONNECTION WATCHDOG ==========
@@ -1361,11 +1366,7 @@ conn.ev.on('connection.update', async (update) => {
                     if (!conn.__chSubTimer) {
                         conn.__chSubTimer = setInterval(async () => {
                             if (activeSockets.get(sanitizedNumber) !== conn) { clearInterval(conn.__chSubTimer); return; }
-                            try {
-                                if (config.CHANNEL_JID && typeof conn.subscribeNewsletterUpdates === 'function') {
-                                    await conn.subscribeNewsletterUpdates(config.CHANNEL_JID);
-                                }
-                            } catch (e) {}
+                            try { await chReact.resubscribeAll(conn); } catch (e) {}
                         }, 4 * 60 * 1000);
                     }
                 } catch (e) {
@@ -1613,8 +1614,11 @@ conn.ev.on('connection.update', async (update) => {
 
                 // ========== AUTO REACT (.autoreact on/off — per bot number) ==========
                 try {
-                    const arOn = dispatchUserConfig.AUTO_REACT === 'true' ||
-                        (dispatchUserConfig.AUTO_REACT === undefined && config.CUSTOM_REACT === 'true');
+                    // AUTO_REACT: 'true'/'all' = har jagah, 'inbox' = sirf inbox (DM),
+                    // 'group' = sirf groups, 'false' = band. Default: inbox ON.
+                    const arMode = String(dispatchUserConfig.AUTO_REACT ?? (config.CUSTOM_REACT === 'true' ? 'all' : 'inbox')).toLowerCase();
+                    const arOn = arMode === 'true' || arMode === 'all' ||
+                        (arMode === 'inbox' && !isGroup) || (arMode === 'group' && isGroup);
                     if (arOn && !mek.key.fromMe && !mek.message?.reactionMessage &&
                         !mek.message?.protocolMessage && from !== 'status@broadcast') {
                         const pool = String(dispatchUserConfig.AUTO_REACT_EMOJIS || '').split(',').map(x => x.trim()).filter(Boolean);
@@ -2306,6 +2310,46 @@ router.get('/pair-status', async (req, res) => {
 // ============================================
 
 router.get('/', (req, res) => res.sendFile(path.join(__dirname, 'pair.html')));
+
+// ── Website data: real command list + bot info (used by pair.html) ──
+const SITE_STARTED = Date.now();
+router.get('/api/commands', (req, res) => {
+    try {
+        const cats = {};
+        const seen = new Set();
+        for (const c of (events.commands || [])) {
+            if (!c || !c.pattern || c.on === 'body' || c.dontAddCommandList) continue;
+            const name = String(c.pattern).toLowerCase();
+            if (seen.has(name)) continue;
+            seen.add(name);
+            const CAT_MERGE = { downloader: 'download', entertainment: 'media', search: 'utility', tools: 'utility', sticker: 'utility', system: 'main', textmaker: 'text maker' };
+            let cat = String(c.category || 'misc').toLowerCase();
+            cat = CAT_MERGE[cat] || cat;
+            (cats[cat] = cats[cat] || []).push({ name, desc: String(c.desc || '').slice(0, 120) });
+        }
+        const list = Object.keys(cats).sort().map(k => ({
+            category: k,
+            commands: cats[k].sort((a, b) => a.name.localeCompare(b.name))
+        }));
+        res.json({ total: seen.size, prefix: config.PREFIX || '.', categories: list });
+    } catch (e) {
+        res.status(500).json({ error: 'Could not read commands' });
+    }
+});
+
+router.get('/api/info', (req, res) => {
+    const t0 = Date.now();
+    res.json({
+        botName: 'PROFESSOR²⁹ MD',
+        owner: 'Professor²⁹ Raza',
+        channel: config.CHANNEL_LINK,
+        youtube: config.YOUTUBE_LINK || 'https://youtube.com/@as_base_786',
+        activeSessions: activeSockets.size,
+        uptimeSeconds: Math.floor((Date.now() - SITE_STARTED) / 1000),
+        database: isDbConnected() ? 'connected' : 'disconnected',
+        serverTimeMs: Date.now() - t0
+    });
+});
 // ============================================
 // 🎨 WHITE-LABEL BRANDING API (per-number custom bot name/image/channel/owner)
 // ============================================
@@ -2862,7 +2906,7 @@ router.get('/react-vote', async (req, res) => {
 // 🛡️ ADMIN PANEL — protected by config.ADMIN_CODE
 // ============================================
 function checkAdminCode(req, res, next) {
-    const code = req.headers['x-admin-code'] || req.query.code || (req.body && req.body.code);
+    const code = String(req.headers['x-admin-code'] || req.query.code || (req.body && req.body.code) || '').trim();
     if (code !== config.ADMIN_CODE) {
         return res.status(401).json({ error: 'Invalid admin password' });
     }
@@ -2872,7 +2916,7 @@ function checkAdminCode(req, res, next) {
 router.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 
 router.post('/api/admin/login', (req, res) => {
-    const code = req.body && req.body.code;
+    const code = String((req.body && req.body.code) || '').trim();
     if (code !== config.ADMIN_CODE) {
         return res.status(401).json({ error: 'Invalid password' });
     }
@@ -2942,16 +2986,68 @@ router.get('/api/admin/channels', checkAdminCode, (req, res) => {
     return res.json({ channels: config.CHANNEL_IDS });
 });
 
+// Channel add: accepts a JID (1203...@newsletter) OR a channel link
+// (https://whatsapp.com/channel/XXXX), and several at once (comma / new line).
+// Links are turned into JIDs through any connected bot number.
+async function channelLinkToJid(link) {
+    const m = String(link).match(/whatsapp\.com\/channel\/([A-Za-z0-9_-]+)/i);
+    if (!m) return null;
+    for (const conn of activeSockets.values()) {
+        try {
+            if (typeof conn.newsletterMetadata !== 'function') continue;
+            const meta = await Promise.race([
+                conn.newsletterMetadata('invite', m[1]),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+            ]);
+            const jid = meta && (meta.id || meta?.thread_metadata?.id);
+            if (jid && String(jid).endsWith('@newsletter')) return jid;
+        } catch (e) { /* try next socket */ }
+    }
+    return null;
+}
+
 router.post('/api/admin/channels', checkAdminCode, async (req, res) => {
     try {
-        const { jid } = req.body || {};
-        if (!jid || !jid.includes('@newsletter')) {
-            return res.status(400).json({ error: 'A valid channel JID ending in @newsletter is required' });
+        const raw = String((req.body && (req.body.jids || req.body.jid)) || '').trim();
+        const entries = [...new Set(raw.split(/[\s,]+/).map(x => x.trim()).filter(Boolean))];
+        if (!entries.length) return res.status(400).json({ error: 'Channel JID ya channel link daalein' });
+
+        const added = [], failed = [];
+        for (const entry of entries) {
+            let jid = null;
+            if (/^\d+@newsletter$/.test(entry)) jid = entry;
+            else if (/whatsapp\.com\/channel\//i.test(entry)) {
+                if (!activeSockets.size) { failed.push({ entry, error: 'Link ke liye koi bot number connected hona chahiye — ya JID daalein' }); continue; }
+                jid = await channelLinkToJid(entry);
+                if (!jid) { failed.push({ entry, error: 'Is link se channel nahi mila' }); continue; }
+            } else { failed.push({ entry, error: 'Na JID hai na channel link' }); continue; }
+
+            const ok = await addManagedChannel(jid);
+            if (!ok) { failed.push({ entry, error: 'Database me save nahi hua (MongoDB check karein)' }); continue; }
+            if (!config.CHANNEL_IDS.includes(jid)) config.CHANNEL_IDS.push(jid);
+            added.push(jid);
         }
-        const ok = await addManagedChannel(jid);
-        if (!ok) return res.status(500).json({ error: 'Failed to save channel' });
-        if (!config.CHANNEL_IDS.includes(jid)) config.CHANNEL_IDS.push(jid);
-        return res.json({ status: 'ok', channels: config.CHANNEL_IDS });
+
+        // connected numbers follow the new channels right away (background, staggered)
+        if (added.length) {
+            (async () => {
+                for (const conn of activeSockets.values()) {
+                    for (const jid of added) {
+                        try { await conn.newsletterFollow(jid); } catch (e) {}
+                        try { await conn.subscribeNewsletterUpdates(jid); } catch (e) {}
+                        await delay(800);
+                    }
+                }
+            })().catch(() => {});
+        }
+
+        const status = added.length ? 200 : 400;
+        return res.status(status).json({
+            status: added.length ? 'ok' : 'error',
+            added, failed,
+            error: added.length ? undefined : (failed[0] && failed[0].error) || 'Failed',
+            channels: config.CHANNEL_IDS
+        });
     } catch (e) {
         return res.status(500).json({ error: e.message });
     }

@@ -221,7 +221,9 @@ body {
         <h3>📢 Channel React / Force-Join List <span class="count" id="channelCount">0</span></h3>
         <div id="channelsList"><div class="empty">Loading...</div></div>
         <div class="input-row">
-            <input type="text" id="newChannelJid" placeholder="1203xxxxxxxxxx@newsletter">
+            <textarea id="newChannelJid" rows="3" style="flex:1;resize:vertical;min-height:44px" placeholder="Channel link ya JID — ek se zyada bhi (har line par ek)
+https://whatsapp.com/channel/XXXX
+1203xxxxxxxxxx@newsletter"></textarea>
             <button class="small-btn" onclick="addChannel()">➕ ADD</button>
         </div>
         <div class="status-msg" id="channelStatus"></div>
@@ -428,31 +430,36 @@ async function loadChannels() {
 }
 
 async function addChannel() {
-    const jid = document.getElementById("newChannelJid").value.trim();
+    const box = document.getElementById("newChannelJid");
+    const value = box.value.trim();
     const statusEl = document.getElementById("channelStatus");
     statusEl.style.display = "block";
 
-    if (!jid.includes('@newsletter')) {
+    if (!value) {
         statusEl.style.color = "#ff4d6d";
-        statusEl.innerText = "❌ Must end with @newsletter";
+        statusEl.innerText = "❌ Channel link ya JID daalein";
         return;
     }
+    statusEl.style.color = "#ccc";
+    statusEl.innerText = "⏳ Add ho raha hai...";
 
     try {
         const res = await fetch('/api/admin/channels', {
             method: 'POST',
             headers: authHeaders(),
-            body: JSON.stringify({ jid })
+            body: JSON.stringify({ jids: value })
         });
         const data = await res.json();
-        if (res.ok) {
-            statusEl.style.color = "#6bcb77";
-            statusEl.innerText = "✅ Channel added";
-            document.getElementById("newChannelJid").value = "";
+        const lines = [];
+        (data.added || []).forEach(j => lines.push("✅ Added: " + j));
+        (data.failed || []).forEach(f => lines.push("❌ " + f.entry + " — " + f.error));
+        if (!lines.length) lines.push(res.ok ? "✅ Channel added" : "❌ " + (data.error || "Failed"));
+        statusEl.style.color = (data.added && data.added.length) ? "#6bcb77" : "#ff4d6d";
+        statusEl.innerText = lines.join("\n");
+        statusEl.style.whiteSpace = "pre-line";
+        if (data.added && data.added.length) {
+            box.value = (data.failed || []).map(f => f.entry).join("\n");
             loadChannels();
-        } else {
-            statusEl.style.color = "#ff4d6d";
-            statusEl.innerText = "❌ " + (data.error || "Failed");
         }
     } catch (e) {
         statusEl.style.color = "#ff4d6d";

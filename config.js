@@ -53,7 +53,8 @@ module.exports = {
      *   → Add: ADMIN_CODE = <a strong password>
      * @type {string}
      */
-    ADMIN_CODE: process.env.ADMIN_CODE || 'professor29admin',
+    // spaces / quotes jo galti se Railway variable me lag jayen, khud hat jate hain
+    ADMIN_CODE: (String(process.env.ADMIN_CODE || '').trim().replace(/^["']+|["']+$/g, '').trim()) || 'professor29admin',
 
     // ═══════════════════════════════════════════
     //  💤 KEEP-ALIVE (stops Heroku Eco dynos sleeping)
@@ -196,7 +197,7 @@ module.exports = {
      * @description Auto-react to status updates
      * @type {string}
      */
-    AUTO_STATUS_REACT: process.env.AUTO_STATUS_REACT || 'false',
+    AUTO_STATUS_REACT: process.env.AUTO_STATUS_REACT || 'true',
 
     /**
      * @description Emoji pool for auto-react feature
@@ -364,7 +365,7 @@ module.exports = {
      * @description Channel post par lagne wale pyare reacts
      * @type {string[]}
      */
-    CHANNEL_REACT_EMOJIS: ['❤️', '🩷', '💖', '💗', '💕', '💞', '💓', '💝', '🥰', '😍', '😘', '🤗', '😊', '☺️', '🫶', '🌹', '🌸', '🌷', '✨', '💫', '🦋', '🤍', '💜', '🎉'],
+    CHANNEL_REACT_EMOJIS: ['🌚', '👻', '💋', '🤭', '☺️', '💀', '👀', '🫂', '🥳', '🥰', '😍', '💖', '🩷', '💗', '💞', '🦋', '🌸', '✨', '🫶', '😘', '🤗', '💫', '🎀', '🧸', '🍓', '🌷'],
 
     /**
      * @description Channel react API (ammar-chreact-api). Key yahan Config Var

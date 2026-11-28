@@ -28,3 +28,12 @@
 - **.ping** — live edit me bhi footer
 - antibot / antifake / kickoffline / botadmin / removeadmins — LID groups me bot-admin check fix
   (removeadmins pehle khud bot ko bhi nikalne ki koshish karta tha)
+
+## v5 (Nov 27, 2026)
+- **Fancy** — lambi replies (40 styles) ab text message me jati hain; pehle image caption ki limit se cut / fail ho jati thin
+- **Auto-react** — `.autoreact inbox | group | all | off` (default: inbox ON), turant asar
+- **Status like/view** — naye numbers ke liye default ON; Baileys v7 (LID) ke liye status react fix; "black popkid" wala purana status reply text hata diya
+- **Song** — apni API lagane ka option: Config Var `SONG_API` / `VIDEO_API` (jaise `https://site.com/ytmp3?url={url}`)
+- **14 nayi commands**: .afk .remind .note .notes .delnote .couple .hug .slap .pat .highfive .poke .salute .riddle .flagquiz
+- Kul commands: **380**
+- Pack 3: 22 aur commands (.horoscope .babyname .emojiquiz .scramble .mathquiz .thisorthat .neverhaveiever .tonguetwister .nickname .hash .lorem .color .weekday .leapyear .discount .zakat .sortwords .shuffle .timestamp .ramadan .eid .islamicmonths) — kul **402**
